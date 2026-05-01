@@ -512,6 +512,7 @@ def test_item_detail_bundles(token_client, organizer, event, team, item, categor
         "bundled_variation": None,
         "count": 1,
         "designated_price": '2.00',
+        "designated_price_percent": '0.0000',
     }]
     resp = token_client.get('/api/v1/organizers/{}/events/{}/items/{}/'.format(organizer.slug, event.slug,
                                                                                item.pk))
@@ -1714,7 +1715,8 @@ TEST_BUNDLE_RES = {
     "bundled_item": 0,
     "bundled_variation": None,
     "count": 1,
-    "designated_price": "2.00"
+    "designated_price": "2.00",
+    "designated_price_percent": "0.0000"
 }
 
 
