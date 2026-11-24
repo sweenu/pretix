@@ -380,6 +380,8 @@ class BankTransfer(BasePaymentProvider):
         d['payer'] = '█'
         if 'send_invoice_to' in d:
             d['send_invoice_to'] = '█'
+        if 'refund_account' in d:
+            d['refund_account']['payer'] = '█'
         d['_shredded'] = True
         obj.info = json.dumps(d)
         obj.save(update_fields=['info'])
@@ -388,11 +390,17 @@ class BankTransfer(BasePaymentProvider):
     def norm(s):
         return s.strip().upper().replace(" ", "")
 
+    @staticmethod
+    def _refund_account(payment):
+        # an account given by the customer on the cancel page wins over the one from the bank statement
+        return payment.info_data.get('refund_account') or payment.info_data
+
     def payment_refund_supported(self, payment: OrderPayment) -> bool:
-        if not all(payment.info_data.get(key) for key in ("payer", "iban")):
+        pi = self._refund_account(payment)
+        if not all(pi.get(key) for key in ("payer", "iban")):
             return False
         try:
-            iban = self.norm(payment.info_data['iban'])
+            iban = self.norm(pi['iban'])
             IBANValidator()(iban)
         except ValidationError:
             return False
@@ -421,7 +429,7 @@ class BankTransfer(BasePaymentProvider):
         return r
 
     def payment_presale_render(self, payment: OrderPayment) -> str:
-        pi = payment.info_data or {}
+        pi = self._refund_account(payment)
         if self.payment_refund_supported(payment):
             try:
                 iban = self.norm(pi['iban'])
@@ -443,10 +451,11 @@ class BankTransfer(BasePaymentProvider):
         if refund.payment is None:
             raise ValueError(_("Can only create a bank transfer refund from an existing payment."))
 
+        pi = self._refund_account(refund.payment)
         refund.info_data = {
-            'payer': refund.payment.info_data['payer'],
-            'iban': self.norm(refund.payment.info_data['iban']),
-            'bic': self.norm(refund.payment.info_data['bic']) if refund.payment.info_data.get('bic') else None,
+            'payer': pi['payer'],
+            'iban': self.norm(pi['iban']),
+            'bic': self.norm(pi['bic']) if pi.get('bic') else None,
         }
         refund.save(update_fields=["info"])
 
@@ -493,6 +502,32 @@ class BankTransfer(BasePaymentProvider):
             'form': f,
         }
         return template.render(ctx)
+
+    def cancel_refund_form_render(self, request: HttpRequest, payment: OrderPayment) -> str:
+        if self.payment_refund_supported(payment):
+            return None
+        f = self.NewRefundForm(prefix=f"cancel-refund-{payment.pk}")
+        template = get_template('pretixplugins/banktransfer/cancel_refund_form.html')
+        return template.render({'form': f, 'payment': payment}, request=request)
+
+    def cancel_refund_form_process(self, request: HttpRequest, payment: OrderPayment):
+        prefix = f"cancel-refund-{payment.pk}"
+        # never let the customer replace an account that is already usable, and skip if the form was not shown
+        if self.payment_refund_supported(payment) or f"{prefix}-iban" not in request.POST:
+            return
+        f = self.NewRefundForm(prefix=prefix, data=request.POST)
+        if not f.is_valid():
+            raise ValidationError(_('Please enter a valid bank account for your refund.'))
+        info = payment.info_data
+        info['refund_account'] = {
+            'payer': f.cleaned_data['payer'],
+            'iban': self.norm(f.cleaned_data['iban']),
+            'bic': self.norm(f.cleaned_data['bic']) if f.cleaned_data.get('bic') else None,
+        }
+        payment.info_data = info
+        if not self.payment_refund_supported(payment):  # e.g. IBAN on the organizer's blocklist
+            raise ValidationError(_('This bank account can not be used for refunds.'))
+        payment.save(update_fields=['info'])
 
     def new_refund_control_form_process(self, request: HttpRequest, amount: Decimal, order: Order) -> OrderRefund:
         f = self.NewRefundForm(

@@ -1,0 +1,13 @@
+{% load i18n %}
+{% load bootstrap3 %}
+<fieldset>
+    <legend>{% trans "Bank account for your refund" %}</legend>
+    <p class="help-block">
+        {% blocktrans trimmed %}
+            We do not know the bank account you paid from. Please enter the account the refund should be sent to.
+        {% endblocktrans %}
+    </p>
+    {% bootstrap_field form.payer layout="horizontal" %}
+    {% bootstrap_field form.iban layout="horizontal" %}
+    {% bootstrap_field form.bic layout="horizontal" %}
+</fieldset>

@@ -702,6 +702,59 @@ class OrdersTest(BaseOrdersTest):
             assert r.provider == "giftcard"
             assert r.amount == Decimal('20.00')
 
+    def test_orders_cancel_banktransfer_without_iban_asks_for_account(self):
+        self.order.status = Order.STATUS_PAID
+        self.order.save()
+        with scopes_disabled():
+            p = self.order.payments.create(provider='banktransfer', amount=self.order.total,
+                                           state=OrderPayment.PAYMENT_STATE_CONFIRMED)
+        self.event.settings.cancel_allow_user_paid = True
+        url = '/%s/%s/order/%s/%s/cancel' % (self.orga.slug, self.event.slug, self.order.code, self.order.secret)
+        response = self.client.get(url)
+        assert 'cancel-refund-%d-iban' % p.pk in response.content.decode()
+
+        # invalid IBAN: nothing happens, back to the cancel page
+        response = self.client.post(url + '/do', {
+            'cancel-refund-%d-payer' % p.pk: 'John Doe',
+            'cancel-refund-%d-iban' % p.pk: 'DE00000000000000000000',
+        })
+        self.assertRedirects(response, url, target_status_code=200)
+        self.order.refresh_from_db()
+        assert self.order.status == Order.STATUS_PAID
+
+        response = self.client.post(url + '/do', {
+            'cancel-refund-%d-payer' % p.pk: 'John Doe',
+            'cancel-refund-%d-iban' % p.pk: 'DE02 1203 0000 0000 2020 51',
+        }, follow=True)
+        self.order.refresh_from_db()
+        assert self.order.status == Order.STATUS_CANCELED
+        with scopes_disabled():
+            r = self.order.refunds.get()
+            assert r.provider == 'banktransfer'
+            assert r.amount == self.order.total
+            assert r.info_data['iban'] == 'DE02120300000000202051'
+            assert r.info_data['payer'] == 'John Doe'
+
+    def test_orders_cancel_banktransfer_known_iban_not_replaced(self):
+        self.order.status = Order.STATUS_PAID
+        self.order.save()
+        with scopes_disabled():
+            p = self.order.payments.create(provider='banktransfer', amount=self.order.total,
+                                           state=OrderPayment.PAYMENT_STATE_CONFIRMED,
+                                           info='{"payer": "Original", "iban": "DE02120300000000202051"}')
+        self.event.settings.cancel_allow_user_paid = True
+        url = '/%s/%s/order/%s/%s/cancel' % (self.orga.slug, self.event.slug, self.order.code, self.order.secret)
+        response = self.client.get(url)
+        assert 'cancel-refund-' not in response.content.decode()
+        self.client.post(url + '/do', {
+            'cancel-refund-%d-payer' % p.pk: 'Attacker',
+            'cancel-refund-%d-iban' % p.pk: 'DE02100500000054540402',
+        }, follow=True)
+        with scopes_disabled():
+            r = self.order.refunds.get()
+            assert r.info_data['iban'] == 'DE02120300000000202051'
+            assert r.info_data['payer'] == 'Original'
+
     def test_orders_cancel_autorefund_gift_card_customer(self):
         self.order.status = Order.STATUS_PAID
         self.order.save()

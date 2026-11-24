@@ -1063,6 +1063,23 @@ class BasePaymentProvider:
         """
         raise ValidationError('Not implemented')
 
+    def cancel_refund_form_render(self, request: HttpRequest, payment: OrderPayment) -> str:
+        """
+        Render a form that is shown to customers on the order cancellation page if the refund of ``payment``
+        needs details from the customer, e.g. a bank account for a bank transfer refund.
+
+        This method should return HTML or ``None``. All form fields should have a globally unique name.
+        """
+        return
+
+    def cancel_refund_form_process(self, request: HttpRequest, payment: OrderPayment):
+        """
+        Process the form rendered by ``cancel_refund_form_render`` when the customer cancels the order. Store
+        the input on ``payment`` so ``payment_refund_supported`` and ``execute_refund`` can use it, or raise
+        ``ValidationError`` if the input is invalid.
+        """
+        pass
+
     def shred_payment_info(self, obj: Union[OrderPayment, OrderRefund]):
         """
         When personal data is removed from an event, this method is called to scrub payment-related data

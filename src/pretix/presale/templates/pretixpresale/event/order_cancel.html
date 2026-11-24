@@ -169,6 +169,7 @@
                             {% endblocktrans %}
                         </p>
                     {% endif %}
+                    {% for f in refund_forms %}{{ f }}{% endfor %}
                 </div>
             {% else %}
                 {% if can_auto_refund %}
@@ -200,6 +201,7 @@
                         {% endblocktrans %}
                     </p>
                 {% endif %}
+                {% for f in refund_forms %}{{ f }}{% endfor %}
             {% endif %}
 
         {% endif %}

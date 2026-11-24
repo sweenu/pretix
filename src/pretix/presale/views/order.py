@@ -1030,6 +1030,12 @@ class OrderCancel(EventViewMixin, OrderDetailMixin, TemplateView):
             p.payment_provider.payment_presale_render(payment=p)
             for p in proposals
         ]
+        ctx['refund_forms'] = []
+        if refund_amount > 0 and self.request.event.settings.cancel_allow_user_paid_refund_as_giftcard in ('off', 'option'):
+            for p in self.order.payments.filter(state=OrderPayment.PAYMENT_STATE_CONFIRMED):
+                html = p.payment_provider and p.payment_provider.cancel_refund_form_render(self.request, p)
+                if html:
+                    ctx['refund_forms'].append(html)
         if self.request.event.settings.cancel_allow_user_paid_adjust_fees_step:
             steps = [fee]
             s = fee
@@ -1099,6 +1105,17 @@ class OrderCancelDo(EventViewMixin, OrderDetailMixin, AsyncAction, View):
                 self.request.POST.get('giftcard') == 'true'
             )
         )
+        if not giftcard:
+            try:
+                for p in self.order.payments.filter(state=OrderPayment.PAYMENT_STATE_CONFIRMED):
+                    if p.payment_provider:
+                        p.payment_provider.cancel_refund_form_process(request, p)
+            except ValidationError as e:
+                messages.error(request, ' '.join(e.messages))
+                return redirect(eventreverse(self.request.event, 'presale:event.order.cancel', kwargs={
+                    'order': self.order.code,
+                    'secret': self.order.secret
+                }))
         if require_approval:
             self.order.cancellation_requests.create(
                 cancellation_fee=fee or Decimal('0.00'),
